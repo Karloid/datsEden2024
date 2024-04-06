@@ -1,5 +1,6 @@
 import java.io.File
-import java.util.Date
+import java.util.*
+import kotlin.collections.ArrayDeque
 import kotlin.math.roundToInt
 
 
@@ -10,17 +11,18 @@ fun main(args: Array<String>) {
     apiToken = args.first()
     println(args.joinToString { it })
 
-
-
     while (true) {
         runCatching { doLoop() }
             .onFailure {
+                Thread.sleep(1000)
                 System.err.println("doLoop failed " + it.stackTraceToString())
             }
     }
 }
 
 private fun doLoop() {
+
+   // Api.resetRound(); System.exit(1)
 
     val roundInfo = Api.getRoundInfo()
 
@@ -78,9 +80,10 @@ private fun doLoop() {
 
         val occupied = maxGarbage.values.map { it.size }.sum()
         val maxOccupied = SHIP_HEIGHT * SHIP_WIDTH
-        val ratio = occupied.toDouble() / maxOccupied
+        val ratioToCargo = occupied.toDouble() / maxOccupied
+        val ratioToPlanet = occupied.toDouble() / planetInfo.planetGarbage!!.values.map { it.size }.sum()
         val planetMaxOccupied = planetInfo.planetGarbage!!.values.map { it.size }.sum()
-        logMap("maxGarbage occupied $occupied from $maxOccupied ratio=$ratio, planetMaxOccupied=$planetMaxOccupied", maxGarbage)
+        logMap("maxGarbage occupied $occupied from $maxOccupied ratioToCargo=$ratioToCargo, planetMaxOccupied=$planetMaxOccupied ratioToPlanet=$ratioToPlanet", maxGarbage)
 
         if (maxOccupied > occupied) {
             log("there still garbage at='$planetsToTravel' removeIt from visited planets")
@@ -129,11 +132,51 @@ fun logMap(label: String, garbage: Map<String, List<List<Int>>>) {
 }
 
 fun findBestLoadOut(universe: UniverseDto, planetInfo: PlanetInfo): Map<String, List<List<Int>>> {
+    var bestLoadout: MutableMap<String, List<List<Int>>> = mutableMapOf()
+    var currentOccupy: BooleanPlainArray = BooleanPlainArray(SHIP_WIDTH, SHIP_HEIGHT)
+
+    val planetMaxSum = planetInfo.planetGarbage!!.values.map { it.size }.sum()
+
+    var count = 0
+    var countUpgrades = 0
+    while (true) {
+        count++
+        val pair = doRandomSearch(planetInfo)
+        val candidate_bestLoadout = pair.first
+        val candidate_currentOccupy = pair.second
+
+        val newSum = candidate_bestLoadout.values.map { it.size }.sum()
+        val prevSum2 = bestLoadout.values.map { it.size }.sum()
+        if (newSum > prevSum2) {
+            countUpgrades++
+            logMap("findBestLoadOut currentOccupy prev=${prevSum2} newSum=${newSum}", currentOccupy)
+            bestLoadout = candidate_bestLoadout
+            currentOccupy = candidate_currentOccupy
+        }
+
+        if (newSum == planetMaxSum) {
+            log("all garbage collected")
+            break
+        }
+
+        if (System.currentTimeMillis() - startCollectTs > 1000) {
+            break
+        }
+    }
+
+    log("findBestLoadOut FINAL variantsChecked=${count} countUpgrades=$countUpgrades currentOccupy")
+    logNotPretty("findBestLoadOut took=${System.currentTimeMillis() - startCollectTs} bestLoadout", bestLoadout)
+
+    return bestLoadout
+}
+
+private fun doRandomSearch(planetInfo: PlanetInfo): Pair<MutableMap<String, List<List<Int>>>, BooleanPlainArray> {
     val shipInitialOccupy = planetInfo.richShipGarbage.occupyArray
 
     val bestLoadout = mutableMapOf<String, List<List<Int>>>()
 
     val queue = ArrayDeque(planetInfo.richPlanetGarbage.listOfRichGarabge)
+    Collections.shuffle(queue)
 
     var currentOccupy = shipInitialOccupy.copy()
 
@@ -159,17 +202,13 @@ fun findBestLoadOut(universe: UniverseDto, planetInfo: PlanetInfo): Map<String, 
                     }
                     breakRepeat = true
 
-                    logNotPretty("add to bestLoadout =${candidate.garbageId} shiftX=$shiftX shiftY=$shiftY cells=", bestLoadout)
+                    //  logNotPretty("add to bestLoadout =${candidate.garbageId} shiftX=$shiftX shiftY=$shiftY cells=", bestLoadout)
                     return@repeat
                 }
             }
         }
     }
-
-    logMap("findBestLoadOut currentOccupy", currentOccupy)
-    logNotPretty("findBestLoadOut took=${System.currentTimeMillis() - startCollectTs} bestLoadout", bestLoadout)
-
-    return bestLoadout
+    return Pair(bestLoadout, currentOccupy)
 }
 
 fun logMap(label: String, garbage: BooleanPlainArray) {

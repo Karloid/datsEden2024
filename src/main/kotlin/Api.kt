@@ -416,6 +416,32 @@ object Api {
 
         return gson.fromJson(body, RoundsInfo::class.java) ?: throw Exception("Failed to parse response response=$response body=$body")
     }
+
+    /**
+     * DELETE https://datsedenspace.datsteam.dev/player/reset
+     */
+    fun resetRound() {
+        throttle()
+
+        val request = okhttp3.Request.Builder()
+            .url("https://datsedenspace.datsteam.dev/player/reset")
+            .delete()
+            .addHeader("Content-Type", "application/json")
+            .addHeader("X-Auth-Token", apiToken)
+            .build()
+
+        val call = okHttpClient.newCall(request)
+
+        val response = call.execute()
+
+        if (response.isSuccessful.not()) {
+            throw Exception("Failed to execute request response=$response ${response.body?.string()}")
+        }
+
+        val body = response.body?.string()
+
+        log(body)
+    }
 }
 
 
