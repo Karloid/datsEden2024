@@ -374,6 +374,74 @@ object Api {
 
         return gson.fromJson(body, CollectResponse::class.java) ?: throw Exception("Failed to parse response response=$response body=$body")
     }
+
+    /**
+     *
+     * GET https://datsedenspace.datsteam.dev/player/rounds
+     *
+     * response
+     * {
+     *   "rounds": [
+     *     {
+     *       "startAt": "2024-04-04 14:00:00",
+     *       "endAt": "2024-04-04 14:30:00",
+     *       "isCurrent": false,
+     *       "name": "round 1",
+     *       "planetCount": 100
+     *     }
+     *   ]
+     * }
+     */
+    fun getRoundInfo(): RoundsInfo {
+        throttle()
+
+        val request = okhttp3.Request.Builder()
+            .url("https://datsedenspace.datsteam.dev/player/rounds")
+            .get()
+            .addHeader("Content-Type", "application/json")
+            .addHeader("X-Auth-Token", apiToken)
+            .build()
+
+        val call = okHttpClient.newCall(request)
+
+        val response = call.execute()
+
+        if (response.isSuccessful.not()) {
+            throw Exception("Failed to execute request response=$response ${response.body?.string()}")
+        }
+
+        val body = response.body?.string()
+
+        log(body)
+
+        return gson.fromJson(body, RoundsInfo::class.java) ?: throw Exception("Failed to parse response response=$response body=$body")
+    }
+}
+
+
+class RoundsInfo {
+    @JvmField
+    var rounds: List<Round>? = null
+
+
+}
+
+class Round {
+    @JvmField
+    var startAt: String? = null
+
+    @JvmField
+    var endAt: String? = null
+
+    @JvmField
+    var isCurrent: Boolean = false
+
+    @JvmField
+    var name: String = ""
+
+    @JvmField
+    var planetCount: Int = 0
+
 }
 
 class CollectResponse {

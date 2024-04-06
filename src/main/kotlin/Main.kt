@@ -1,3 +1,4 @@
+import java.io.File
 import java.util.Date
 import kotlin.math.roundToInt
 
@@ -20,6 +21,23 @@ fun main(args: Array<String>) {
 }
 
 private fun doLoop() {
+
+    val roundInfo = Api.getRoundInfo()
+
+    val roundName = roundInfo.rounds?.firstOrNull { it.isCurrent }?.name ?: "unknown-round"
+
+    // load visited planets from file from file system "$ROUND_NAME.txt"
+    visitedPlanets.clear()
+    val file = File("$roundName.txt")
+    if (file.exists()) {
+        file.readLines().forEach {
+            visitedPlanets.add(it)
+        }
+    }
+    visitedPlanets.add("Eden")
+    visitedPlanets.add("Earth")
+
+
     while (true) {
         log("get universe")
         val universe = Api.getUniverse()
@@ -39,12 +57,13 @@ private fun doLoop() {
 
         if (finalPlanetsPath.isEmpty()) {
             log("no planets to travel, sleep")
-            Thread.sleep(500)
-            return
+            Thread.sleep(1000)
+            throw RuntimeException("no planets to travel, restart, wait for new round")
         }
 
         val planetInfo = Api.travel(finalPlanetsPath)
 
+        saveVisitedPlanets(roundName)
         // log("planetInfo", planetInfo)
 
         if (planetInfo.planetGarbage!!.isEmpty()) {
@@ -67,6 +86,7 @@ private fun doLoop() {
             log("there still garbage at='$planetsToTravel' removeIt from visited planets")
             visitedPlanets.remove(planetsToTravel.last())
         }
+        saveVisitedPlanets(roundName)
 
         val collectResponse = Api.collect(maxGarbage)
 
@@ -75,6 +95,12 @@ private fun doLoop() {
         Thread.sleep(500)
         // break
     }
+}
+
+fun saveVisitedPlanets(roundName: String) {
+    val file = File("$roundName.txt")
+    file.absoluteFile.let { println("file path " + it) }
+    file.writeText(visitedPlanets.joinToString("\n"))
 }
 
 /**
