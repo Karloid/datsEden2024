@@ -10,7 +10,7 @@ import kotlin.math.roundToInt
 
 var startCollectTs = 0L
 
-val THREAD_COUNT = 8
+const val THREAD_COUNT = 8
 val executor = Executors.newFixedThreadPool(THREAD_COUNT)
 
 fun main(args: Array<String>) {
