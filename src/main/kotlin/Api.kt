@@ -21,7 +21,7 @@ object Api {
      *
      * Content type
      * application/json
-     * 
+     *
      * response example
      *
      * {
@@ -130,6 +130,7 @@ object Api {
      * }
      */
     fun getUniverse(): UniverseDto {
+        throttle()
         // implementation
         val request = okhttp3.Request.Builder()
             .url("https://datsedenspace.datsteam.dev/player/universe")
@@ -143,14 +144,43 @@ object Api {
         val response = call.execute()
 
         if (response.isSuccessful.not()) {
-            throw Exception("Failed to execute request response=$response")
+            throw Exception("Failed to execute request response=$response body=${response.body?.string()}")
         }
 
         val body = response.body?.string()
 
         log(body)
 
-        return gson.fromJson(body, UniverseDto::class.java) ?: throw Exception("Failed to parse response response=$response body=$body")
+        val result = gson.fromJson(body, UniverseDto::class.java) ?: throw Exception("Failed to parse response response=$response body=$body")
+        return result
+    }
+
+
+    val lastRequest = ArrayDeque<Long>()
+
+    /**
+     * we should not fire more than 4 request per second
+     */
+    private fun throttle() {
+        val currentTs = System.currentTimeMillis()
+
+        // remove requests older than 1 second
+
+        while (lastRequest.isNotEmpty() && currentTs - lastRequest.first() > 1000) {
+            lastRequest.removeFirst()
+        }
+
+        if (lastRequest.size < 4) {
+            lastRequest.add(currentTs)
+            return
+        }
+
+        val sleepTime = 1000 - (currentTs - lastRequest.first())
+
+        log("throttle sleep for $sleepTime")
+        Thread.sleep(sleepTime)
+
+        lastRequest.add(System.currentTimeMillis())
     }
 
     /**
@@ -233,7 +263,8 @@ object Api {
      *   }
      * }
      */
-    fun travel(planetsToTravel: List<String>):PlanetInfo {
+    fun travel(planetsToTravel: List<String>): PlanetInfo {
+        throttle()
         // implementation
         val requestBody = gson.toJson(mapOf("planets" to planetsToTravel))
         val request = okhttp3.Request.Builder()
@@ -248,14 +279,17 @@ object Api {
         val response = call.execute()
 
         if (response.isSuccessful.not()) {
-            throw Exception("Failed to execute request response=$response")
+            throw Exception("Failed to execute request response=$response body=${response.body?.string()}")
         }
 
         val body = response.body?.string()
 
         log(body)
 
-        return gson.fromJson(body, PlanetInfo::class.java) ?: throw Exception("Failed to parse response response=$response body=$body")
+        val planetInfo = gson.fromJson(body, PlanetInfo::class.java) ?: throw Exception("Failed to parse response response=$response body=$body")
+
+        planetInfo.constructGarbageArrays()
+        return planetInfo
     }
 
     /**
@@ -316,6 +350,7 @@ object Api {
      * }
      */
     fun collect(garbageToCollect: Map<String, List<List<Int>>>): CollectResponse {
+        throttle()
 
         val requestBody = gson.toJson(mapOf("garbage" to garbageToCollect))
         val request = okhttp3.Request.Builder()
@@ -335,7 +370,7 @@ object Api {
 
         val body = response.body?.string()
 
-        log(body)
+        //  log(body)
 
         return gson.fromJson(body, CollectResponse::class.java) ?: throw Exception("Failed to parse response response=$response body=$body")
     }
@@ -349,6 +384,9 @@ class CollectResponse {
     var leaved: List<String>? = null
 }
 
+var SHIP_WIDTH = 5
+var SHIP_HEIGHT = 7
+
 class PlanetInfo {
     @JvmField
     var fuelDiff: Int = 0
@@ -361,7 +399,60 @@ class PlanetInfo {
 
     @JvmField
     var shipGarbage: Map<String, List<List<Int>>>? = null
+
+    lateinit var richShipGarbage: RichShipGarbage
+    lateinit var richPlanetGarbage: RichPlanetGarbage
+
+
+    fun constructGarbageArrays() {
+        richShipGarbage = RichShipGarbage()
+
+        richShipGarbage.simpleMap = shipGarbage ?: emptyMap()
+
+        richShipGarbage.occupyArray = BooleanPlainArray(SHIP_WIDTH, SHIP_HEIGHT)
+
+        richShipGarbage.simpleMap.values.forEach {
+            it.forEach { pair ->
+                richShipGarbage.occupyArray.set(pair[0], pair[1], true)
+            }
+        }
+
+
+        richPlanetGarbage = RichPlanetGarbage()
+        richPlanetGarbage.simpleMap = planetGarbage!!
+        richPlanetGarbage.listOfRichGarabge = richPlanetGarbage.simpleMap.entries.map { entry ->
+            RichGarbage(entry.key, entry.value)
+        }
+    }
 }
+
+class RichGarbage(val garbageId: String, value: List<List<Int>>) {
+
+    val occupyArray = BooleanPlainArray(SHIP_WIDTH, SHIP_HEIGHT)
+
+    init {
+        value.forEach { pair ->
+            occupyArray.set(pair[0], pair[1], true)
+        }
+
+        //val listOfArrayPoints: List<List<Int>> = occupyArray.toListOfArrayPoints()
+        // TODO add rotation for occupyArray
+    }
+
+}
+
+class RichShipGarbage {
+
+
+    lateinit var occupyArray: BooleanPlainArray
+    lateinit var simpleMap: Map<String, List<List<Int>>>
+}
+
+class RichPlanetGarbage {
+    lateinit var simpleMap: Map<String, List<List<Int>>>
+    lateinit var listOfRichGarabge: List<RichGarbage>
+}
+
 
 class PlanetDiff {
     @JvmField
