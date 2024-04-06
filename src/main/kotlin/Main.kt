@@ -1,10 +1,17 @@
 import java.io.File
 import java.util.*
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.stream.Collectors
+import java.util.stream.IntStream
 import kotlin.collections.ArrayDeque
 import kotlin.math.roundToInt
 
 
 var startCollectTs = 0L
+
+val THREAD_COUNT = 8
+val executor = Executors.newFixedThreadPool(THREAD_COUNT)
 
 fun main(args: Array<String>) {
     println("Started ${Date()}")
@@ -22,7 +29,7 @@ fun main(args: Array<String>) {
 
 private fun doLoop() {
 
-   // Api.resetRound(); System.exit(1)
+    // Api.resetRound(); System.exit(1)
 
     val roundInfo = Api.getRoundInfo()
 
@@ -47,8 +54,6 @@ private fun doLoop() {
         SHIP_WIDTH = universe.ship!!.capacityX
         SHIP_HEIGHT = universe.ship!!.capacityY
 
-        //log(universe)
-
         logMap("current cargo", universe.ship!!.garbage!!)
 
         val planetsToTravel = getPlanetsToTravel(universe).toMutableList()
@@ -65,10 +70,8 @@ private fun doLoop() {
 
         val planetInfo = Api.travel(finalPlanetsPath)
 
-        saveVisitedPlanets(roundName)
-        // log("planetInfo", planetInfo)
-
         if (planetInfo.planetGarbage!!.isEmpty()) {
+            saveVisitedPlanets(roundName)
             log("no garbage on planet, go next")
             Thread.sleep(500)
             continue
@@ -76,7 +79,7 @@ private fun doLoop() {
 
         startCollectTs = System.currentTimeMillis()
 
-        val maxGarbage = findBestLoadOut(universe, planetInfo)
+        val maxGarbage = findBestLoadOutFacade(planetInfo)
 
         val occupied = maxGarbage.values.map { it.size }.sum()
         val maxOccupied = SHIP_HEIGHT * SHIP_WIDTH
@@ -91,13 +94,38 @@ private fun doLoop() {
         }
         saveVisitedPlanets(roundName)
 
-        val collectResponse = Api.collect(maxGarbage)
+        runCatching {
+            Api.collect(maxGarbage)
+        }.onFailure {
+
+            val shouldResetVisitedPlanets = !(it.message?.contains("Bad Gateway") == true)
+            if (shouldResetVisitedPlanets) {
+                visitedPlanets.clear()
+                saveVisitedPlanets(roundName)
+                visitedPlanets.add("Eden")
+                visitedPlanets.add("Earth")
+            }
+            throw it
+        }
 
         log("collected")
 
         Thread.sleep(500)
         // break
     }
+}
+
+private fun findBestLoadOutFacade(planetInfo: PlanetInfo): Map<String, List<List<Int>>> {
+    val futures = IntStream.range(0, THREAD_COUNT)
+        .mapToObj { executor.submit(Callable { findBestLoadOut(planetInfo.deepCopy()) }) }
+        .collect(Collectors.toList())
+
+    val maxGarbages = futures.stream()
+        .map { it.get() }
+        .collect(Collectors.toList())
+
+    val maxGarbage = maxGarbages.maxBy { it.values.map { it.size }.sum() }
+    return maxGarbage
 }
 
 fun saveVisitedPlanets(roundName: String) {
@@ -131,9 +159,8 @@ fun logMap(label: String, garbage: Map<String, List<List<Int>>>) {
     }
 }
 
-fun findBestLoadOut(universe: UniverseDto, planetInfo: PlanetInfo): Map<String, List<List<Int>>> {
+fun findBestLoadOut(planetInfo: PlanetInfo): Map<String, List<List<Int>>> {
     var bestLoadout: MutableMap<String, List<List<Int>>> = mutableMapOf()
-    var currentOccupy: BooleanPlainArray = BooleanPlainArray(SHIP_WIDTH, SHIP_HEIGHT)
 
     val planetMaxSum = planetInfo.planetGarbage!!.values.map { it.size }.sum()
 
@@ -143,15 +170,13 @@ fun findBestLoadOut(universe: UniverseDto, planetInfo: PlanetInfo): Map<String, 
         count++
         val pair = doRandomSearch(planetInfo)
         val candidate_bestLoadout = pair.first
-        val candidate_currentOccupy = pair.second
 
         val newSum = candidate_bestLoadout.values.map { it.size }.sum()
         val prevSum2 = bestLoadout.values.map { it.size }.sum()
         if (newSum > prevSum2) {
             countUpgrades++
-            logMap("findBestLoadOut currentOccupy prev=${prevSum2} newSum=${newSum}", currentOccupy)
+            log("findBestLoadOut currentOccupy prev=${prevSum2} newSum=${newSum}")
             bestLoadout = candidate_bestLoadout
-            currentOccupy = candidate_currentOccupy
         }
 
         if (newSum == planetMaxSum) {
@@ -159,7 +184,7 @@ fun findBestLoadOut(universe: UniverseDto, planetInfo: PlanetInfo): Map<String, 
             break
         }
 
-        if (System.currentTimeMillis() - startCollectTs > 1000) {
+        if (System.currentTimeMillis() - startCollectTs > 3000) {
             break
         }
     }
@@ -177,6 +202,11 @@ private fun doRandomSearch(planetInfo: PlanetInfo): Pair<MutableMap<String, List
 
     val queue = ArrayDeque(planetInfo.richPlanetGarbage.listOfRichGarabge)
     Collections.shuffle(queue)
+    queue.forEach { garbage ->
+        val rotation = (Math.random() * 4).toInt()
+
+        garbage.applyRotation(rotation)
+    }
 
     var currentOccupy = shipInitialOccupy.copy()
 
@@ -196,7 +226,7 @@ private fun doRandomSearch(planetInfo: PlanetInfo): Pair<MutableMap<String, List
                 }
                 if (canBeApplied(currentOccupy, candidateOccupy, shiftX, shiftY)) {
                     currentOccupy = applyOccupy(currentOccupy, candidateOccupy, shiftX, shiftY)
-                    val points: List<List<Int>> = planetInfo.richPlanetGarbage.simpleMap[candidate.garbageId]!!
+                    val points: List<List<Int>> = candidate.pointsAsList
                     bestLoadout[candidate.garbageId] = points.map {
                         listOf(it[0] + shiftX, it[1] + shiftY)
                     }
@@ -271,7 +301,12 @@ private fun getPlanetsToTravel(universe: UniverseDto): List<String> {
 
     val currentPlanet = universe.ship!!.planet
 
-    val targetPlanet = if (shipHasGarbage) {
+    val occupied = universe.ship!!.garbage!!.values.map { it.size }.sum()
+    val totalSpace = SHIP_HEIGHT * SHIP_WIDTH
+
+    val occupiedRatio = occupied.toDouble() / totalSpace
+
+    val targetPlanet = if (shipHasGarbage && occupiedRatio > 0.4) {
         log("getPlanetsToTravel go to empty garbage on Eden")
         EDEN_PLANET
     } else {
@@ -279,7 +314,7 @@ private fun getPlanetsToTravel(universe: UniverseDto): List<String> {
         findClosestPlanetWithConditionBfs(universe, currentPlanet!!.name!!).also {
             visitedPlanets.add(it)
         }.also {
-            log("getPlanetsToTravel go to closest not visited planet with garbage $it")
+            log("getPlanetsToTravel go to closest not visited planet with garbage $it ${if (occupiedRatio > 0.0001) " SHIP HAS SOME GARBAGE ration=${occupiedRatio}" else ""}")
         }
     }
 

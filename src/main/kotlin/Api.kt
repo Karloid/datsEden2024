@@ -518,24 +518,72 @@ class PlanetInfo {
             RichGarbage(entry.key, entry.value)
         }
     }
+
+    fun deepCopy(): PlanetInfo {
+        val result = PlanetInfo()
+        result.fuelDiff = fuelDiff
+        result.planetDiffs = planetDiffs
+        result.planetGarbage = planetGarbage
+        result.shipGarbage = shipGarbage
+        result.richShipGarbage = richShipGarbage.deepCopy()
+        result.richPlanetGarbage = richPlanetGarbage.deepCopy()
+        return result
+    }
 }
 
-class RichGarbage(val garbageId: String, value: List<List<Int>>) {
-
+class RichGarbage(val garbageId: String, var pointsAsList: List<List<Int>>) {
     val occupyArray = BooleanPlainArray(SHIP_WIDTH, SHIP_HEIGHT)
 
     init {
-        value.forEach { pair ->
-            occupyArray.set(pair[0], pair[1], true)
-        }
+        constructOccupyArray()
 
         //val listOfArrayPoints: List<List<Int>> = occupyArray.toListOfArrayPoints()
         // TODO add rotation for occupyArray
     }
 
+    fun applyRotation(rotation: Int) {
+        if (rotation == 0) {
+            return
+        }
+        // rotation = 1 = 90 degrees
+        // rotation = 2 = 180 degrees
+        // rotation = 3 = 270 degrees
+
+        val times = rotation % 4
+        for (i in 1..times) {
+            pointsAsList = pointsAsList.map { listOf(it[1], -it[0]) }
+        }
+
+        // align all coordinates to top left corner, so none of coordinates is negative, but we should stick to top left corner
+        val minX = pointsAsList.minOf { it[0] }
+        val minY = pointsAsList.minOf { it[1] }
+
+        pointsAsList = pointsAsList.map { listOf(it[0] - minX, it[1] - minY) }
+
+        constructOccupyArray()
+    }
+
+    private fun constructOccupyArray() {
+        occupyArray.clear()
+        pointsAsList.forEach { pair ->
+            occupyArray.set(pair[0], pair[1], true)
+        }
+    }
+
+    fun deepCopy(): RichGarbage {
+        val result = RichGarbage(garbageId, pointsAsList.map { it.toList() })
+        return result
+    }
+
 }
 
 class RichShipGarbage {
+    fun deepCopy(): RichShipGarbage {
+        val result = RichShipGarbage()
+        result.simpleMap = simpleMap
+        result.occupyArray = occupyArray.copy()
+        return result
+    }
 
 
     lateinit var occupyArray: BooleanPlainArray
@@ -543,6 +591,13 @@ class RichShipGarbage {
 }
 
 class RichPlanetGarbage {
+    fun deepCopy(): RichPlanetGarbage {
+        val result = RichPlanetGarbage()
+        result.simpleMap = HashMap(simpleMap)
+        result.listOfRichGarabge = listOfRichGarabge.map { it.deepCopy() }
+        return result
+    }
+
     lateinit var simpleMap: Map<String, List<List<Int>>>
     lateinit var listOfRichGarabge: List<RichGarbage>
 }
